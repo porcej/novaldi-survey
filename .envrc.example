@@ -1,0 +1,12 @@
+# Wrangler CLI credentials — which Cloudflare account to use.
+# Copy to `.envrc` or `.env`. Do not prefix these with VITE_.
+#
+# App runtime secrets (ADMIN_PASSWORD, SESSION_SECRET, etc.) stay in `.dev.vars`.
+
+# Dashboard → any domain or Workers page → copy Account ID from the right sidebar
+# or run: npx wrangler whoami
+CLOUDFLARE_ACCOUNT_ID=
+
+# Dashboard → My Profile → API Tokens → Create Token
+# Recommended: "Edit Cloudflare Workers" template, scoped to this account.
+CLOUDFLARE_API_TOKEN=

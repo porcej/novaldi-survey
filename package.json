@@ -1,0 +1,35 @@
+{
+  "name": "novaldi-survey",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n css,worker -c yellow,cyan \"npm run css:watch\" \"wrangler dev\"",
+    "css:watch": "tailwindcss -i src/styles/global.css -o public/styles.css --watch",
+    "css:build": "tailwindcss -i src/styles/global.css -o public/styles.css --minify",
+    "build": "npm run css:build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "npm run build && wrangler deploy",
+    "types": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply novaldi-survey --local"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "hono": "^4.9.8",
+    "uqr": "^0.1.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "@tailwindcss/cli": "^4.1.12",
+    "@types/node": "^26.4.0",
+    "concurrently": "^9.2.1",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.34.0"
+  }
+}

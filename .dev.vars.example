@@ -1,0 +1,5 @@
+SESSION_SECRET=change-me-to-a-long-random-string
+# Quote values that contain #, spaces, or quotes. Wrangler treats unquoted # as a comment.
+STAFF_PASSWORD="change-me"
+ADMIN_PASSWORD="change-me"
+ADMIN_EMAILS=admin@novaldi.us
