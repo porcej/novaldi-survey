@@ -83,6 +83,14 @@ export function formatInstant(iso: string, timeZone: string): string {
   }).format(new Date(iso));
 }
 
+export function formatClock(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+}
+
+export function formatWeekday(date: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'long', month: 'long', day: 'numeric' }).format(new Date(zonedToUtc(date, '12:00', timeZone)));
+}
+
 export function formatDay(isoOrDate: string, timeZone: string): string {
   const iso = isoOrDate.includes('T') ? isoOrDate : zonedToUtc(isoOrDate, '12:00', timeZone);
   return new Intl.DateTimeFormat('en-US', {

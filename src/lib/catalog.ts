@@ -57,6 +57,22 @@ export async function loadCatalog(db: D1Database): Promise<Catalog> {
   return { event, programs, categories, sessions, assignments, templates, instructors, counts };
 }
 
+export function publicCards(catalog: Catalog, now = new Date().toISOString()): AssignmentCard[] {
+  return toCards(catalog, now).filter((card) => card.assignment.publication === 'published');
+}
+
+export function cardProgram(card: AssignmentCard, catalog: Catalog): 'company' | 'command' | 'shared' {
+  const sessionProgram = card.session ? catalog.programs.find((item) => item.id === card.session?.program_id) : null;
+  const sessionKey = sessionProgram ? programKey(sessionProgram.name) : null;
+  if (sessionKey === 'company' || sessionKey === 'command') return sessionKey;
+  if (card.audienceKey === 'company' || card.audienceKey === 'command') return card.audienceKey;
+  return 'shared';
+}
+
+export function openProgramCards(cards: AssignmentCard[], catalog: Catalog, program: 'company' | 'command'): AssignmentCard[] {
+  return cards.filter((card) => card.window.availability === 'open' && cardProgram(card, catalog) === program);
+}
+
 export function toCards(catalog: Catalog, now = new Date().toISOString()): AssignmentCard[] {
   return catalog.assignments
     .map((assignment) => toCard(catalog, assignment, now))

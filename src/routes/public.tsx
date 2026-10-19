@@ -1,40 +1,64 @@
 import { Hono } from 'hono';
+import type { FC } from 'hono/jsx';
 import { getCookie, setCookie } from 'hono/cookie';
-import { site } from '../content/site';
+import { loadCatalog, openProgramCards, publicCards } from '../lib/catalog';
 import { getAssignmentByPublicId, getEvent, getSession, guardExists, saveResponse } from '../lib/db';
 import { fieldsToForm, readFields } from '../lib/form';
 import { sha256Hex } from '../lib/crypto';
 import { newPublicId } from '../lib/ids';
 import { collectAnswers, formValueMap } from '../lib/questions';
 import { computeWindow, parseRules } from '../lib/schedule';
-import { dateInZone, formatInstant } from '../lib/time';
+import { instructorList } from '../lib/format';
+import { dateInZone, formatClock, formatDay, formatInstant } from '../lib/time';
+import { ClassDirectory, SurveyDirectory } from '../views/Directory';
 import { Banner, Hero, Section } from '../views/Layout';
 import { SurveyForm } from '../views/SurveyForm';
 import { page, type AppContext } from './guard';
 
 export const publicRoutes = new Hono<{ Bindings: Env }>();
 
-publicRoutes.get('/', (c) =>
-  page(
+publicRoutes.get('/', async (c) => {
+  const catalog = await loadCatalog(c.env.DB);
+  const cards = publicCards(catalog);
+  return page(c, {}, 'Classes', <ClassDirectory catalog={catalog} cards={cards} />);
+});
+
+publicRoutes.get('/company', async (c) => programIndex(c, 'company'));
+publicRoutes.get('/command', async (c) => programIndex(c, 'command'));
+
+async function programIndex(c: AppContext, program: 'company' | 'command') {
+  const catalog = await loadCatalog(c.env.DB);
+  const name = program === 'company' ? 'Company' : 'Command';
+  const cards = openProgramCards(publicCards(catalog), catalog, program);
+  return page(
     c,
     {},
-    'Evaluations',
-    <>
-      <Hero title="Evaluations" lead={`Feedback for ${site.session.dates}. Open the link or QR code from your class.`} />
-      <Section title="Open a survey" narrow>
-        <form method="get" action="/go" class="space-y-4">
-          <label class="block">
-            <span class="font-display text-sm font-semibold uppercase tracking-wide text-navy">Survey link or code</span>
-            <input class="input mt-1.5" name="code" required autocomplete="off" />
-          </label>
-          <button type="submit" class="btn btn-primary">
-            Continue
-          </button>
-        </form>
-      </Section>
-    </>,
-  ),
-);
+    `${name} surveys`,
+    <SurveyDirectory title={`${name} surveys`} lead={`Published ${name} Officer surveys that are open now.`} cards={cards} zone={catalog.event.timezone} empty={`No ${name} surveys are open right now.`} showSession />,
+  );
+}
+
+publicRoutes.get('/class/:id', async (c) => {
+  const catalog = await loadCatalog(c.env.DB);
+  const cards = publicCards(catalog);
+  const zone = catalog.event.timezone;
+  const id = c.req.param('id') ?? '';
+  if (id === 'shared') {
+    return page(c, {}, 'Every class', <SurveyDirectory title="Every class" lead="Surveys that are not tied to one class." cards={cards.filter((card) => !card.session)} zone={zone} />);
+  }
+  const sessionId = Number(id);
+  const session = catalog.sessions.find((item) => item.id === sessionId);
+  if (!session) {
+    return page(c, {}, 'Class not found', <Hero title="Class not found" lead="That class is not on the schedule." />, 404);
+  }
+  const program = catalog.programs.find((item) => item.id === session.program_id)?.name ?? 'All classes';
+  const instructors = instructorList(catalog.instructors.get(session.id) ?? []);
+  const lead = [program, formatDay(session.starts_at, zone), `${formatClock(session.starts_at, zone)}–${formatClock(session.ends_at, zone)}`, session.location, instructors]
+    .filter(Boolean)
+    .join(' · ');
+  const surveys = cards.filter((card) => card.session?.id === session.id);
+  return page(c, {}, session.title, <SurveyDirectory title={session.title} lead={lead} cards={surveys} zone={zone} />);
+});
 
 publicRoutes.get('/go', (c) => {
   const id = extractId(c.req.query('code') ?? '');
@@ -67,6 +91,9 @@ publicRoutes.get('/s/:publicId/thanks', (c) =>
       <Hero title="Thank you" lead="Your evaluation was submitted." />
       <Section title="You are done" narrow>
         <p class="text-muted">You can close this page. If the survey was anonymous, this confirmation is not tied to your answers.</p>
+        <a href="/" class="btn btn-primary mt-6">
+          All classes
+        </a>
       </Section>
     </>,
   ),
@@ -131,6 +158,7 @@ async function renderSurvey(c: AppContext, preview: boolean) {
     <>
       <Hero compact title={loaded.assignment.title} lead={loaded.assignment.description || (loaded.assignment.required_flag ? 'This evaluation is requested from your class.' : 'This evaluation is optional.')} />
       <Section>
+        <ClassLinks sessionId={loaded.assignment.session_id} />
         <SurveyForm document={loaded.document} action={`/s/${publicId}`} anonymity={loaded.assignment.anonymity} preview={preview} />
       </Section>
     </>,
@@ -161,12 +189,12 @@ async function loadOpen(c: AppContext, publicId: string) {
     const when = window.availability === 'scheduled' && window.openAt ? ` It opens ${formatInstant(window.openAt, event.timezone)}.` : '';
     const closed = window.availability === 'closed' ? ' This evaluation is closed.' : '';
     const waiting = window.availability === 'draft' || window.availability === 'archived' ? ' This evaluation is not available.' : '';
-    return surveyMessage(c, assignment.title, `${waiting || closed || 'This evaluation is not open yet.'}${when}`.trim(), 403);
+    return surveyMessage(c, assignment.title, `${waiting || closed || 'This evaluation is not open yet.'}${when}`.trim(), 403, assignment.session_id);
   }
   return { assignment, event, document: JSON.parse(assignment.rendered_json) };
 }
 
-function surveyMessage(c: AppContext, title: string, lead: string, status: 400 | 403 | 404 | 429) {
+function surveyMessage(c: AppContext, title: string, lead: string, status: 400 | 403 | 404 | 429, sessionId?: number | null) {
   return page(
     c,
     {},
@@ -174,14 +202,32 @@ function surveyMessage(c: AppContext, title: string, lead: string, status: 400 |
     <>
       <Hero title={title} lead={lead} />
       <Section narrow>
-        <a href="/" class="btn btn-primary">
-          Evaluation home
-        </a>
+        <div class="flex flex-wrap gap-3">
+          <a href="/" class="btn btn-primary">
+            All classes
+          </a>
+          {sessionId ? (
+            <a href={`/class/${sessionId}`} class="btn btn-quiet">
+              This class
+            </a>
+          ) : null}
+        </div>
       </Section>
     </>,
     status,
   );
 }
+
+const ClassLinks: FC<{ sessionId: number | null }> = (props) => (
+  <p class="mb-6 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+    <a href="/" class="font-semibold text-navy underline">
+      All classes
+    </a>
+    <a href={props.sessionId ? `/class/${props.sessionId}` : '/class/shared'} class="font-semibold text-navy underline">
+      {props.sessionId ? 'This class' : 'Surveys for every class'}
+    </a>
+  </p>
+);
 
 function alreadySubmitted(c: AppContext, title: string) {
   return page(

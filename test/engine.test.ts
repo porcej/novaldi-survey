@@ -7,6 +7,7 @@ import {
   fieldName,
   findQuestion,
   newQuestion,
+  parseSurveyDocument,
   questionFromFields,
   validateDocument,
   type SurveyDocument,
@@ -30,7 +31,31 @@ function form(entries: Record<string, string | string[]>): FormData {
 
 describe('questionnaires', () => {
   it('accepts the seeded templates', () => {
-    for (const template of SEED_TEMPLATES) expect(validateDocument(template.document)).toEqual([]);
+    for (const template of SEED_TEMPLATES) {
+      expect(validateDocument(template.document)).toEqual([]);
+      const parsed = parseSurveyDocument(JSON.parse(JSON.stringify(template.document)));
+      expect('document' in parsed).toBe(true);
+      if ('document' in parsed) expect(validateDocument(parsed.document)).toEqual([]);
+    }
+  });
+
+  it('rejects an unknown question type and a later dependency', () => {
+    expect(parseSurveyDocument({ sections: [{ id: 'main', title: 'Questions', questions: [{ id: 'q1', type: 'rank', title: 'Rank' }] }] })).toEqual({ error: 'A question has an unknown type.' });
+    const later = {
+      sections: [
+        {
+          id: 'main',
+          title: 'Questions',
+          questions: [
+            { id: 'first', type: 'yes_no', title: 'First', yesLabel: 'Yes', noLabel: 'No', visibility: [{ questionId: 'second', operator: 'equals', value: 'Yes' }] },
+            { id: 'second', type: 'yes_no', title: 'Second', yesLabel: 'Yes', noLabel: 'No' },
+          ],
+        },
+      ],
+    };
+    const parsed = parseSurveyDocument(later);
+    expect('document' in parsed).toBe(true);
+    if ('document' in parsed) expect(validateDocument(parsed.document).some((error) => error.includes('earlier question'))).toBe(true);
   });
 
   it('requires a visible rating and drops hidden hotel answers', () => {

@@ -302,6 +302,186 @@ function cycleErrors(doc: SurveyDocument): string[] {
   return errors;
 }
 
+export function parseSurveyDocument(value: unknown): { document: SurveyDocument } | { error: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: 'The survey could not be read.' };
+  const sections = (value as { sections?: unknown }).sections;
+  if (!Array.isArray(sections) || sections.length === 0) return { error: 'Add a section.' };
+  if (sections.length > 40) return { error: 'Too many sections.' };
+  const parsed: SurveySection[] = [];
+  const sectionIds = new Set<string>();
+  let questionCount = 0;
+  for (const item of sections) {
+    const section = parseSection(item);
+    if ('error' in section) return section;
+    if (sectionIds.has(section.section.id)) return { error: 'Two sections share an id.' };
+    sectionIds.add(section.section.id);
+    questionCount += section.section.questions.length;
+    if (questionCount > 200) return { error: 'Too many questions.' };
+    parsed.push(section.section);
+  }
+  return { document: { sections: parsed } };
+}
+
+function parseSection(value: unknown): { section: SurveySection } | { error: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: 'A section is not valid.' };
+  const raw = value as Record<string, unknown>;
+  const id = readId(raw.id);
+  if (!id) return { error: 'A section is missing an id.' };
+  const visibility = parseVisibility(raw.visibility);
+  if ('error' in visibility) return visibility;
+  if (!Array.isArray(raw.questions)) return { error: 'A section is missing its questions.' };
+  if (raw.questions.length > 100) return { error: 'A section has too many questions.' };
+  const questions: Question[] = [];
+  for (const item of raw.questions) {
+    const question = parseQuestion(item);
+    if ('error' in question) return question;
+    questions.push(question.question);
+  }
+  return {
+    section: {
+      id,
+      title: readString(raw.title, 200),
+      description: readString(raw.description, 2000),
+      visibility: visibility.rules,
+      questions,
+    },
+  };
+}
+
+function parseQuestion(value: unknown): { question: Question } | { error: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: 'A question is not valid.' };
+  const raw = value as Record<string, unknown>;
+  const id = readId(raw.id);
+  if (!id) return { error: 'A question is missing an id.' };
+  const type = QUESTION_TYPES.find((item) => item === raw.type);
+  if (!type) return { error: 'A question has an unknown type.' };
+  const visibility = parseVisibility(raw.visibility);
+  if ('error' in visibility) return visibility;
+  const base = {
+    id,
+    title: readString(raw.title, 300),
+    description: readString(raw.description, 2000),
+    required: raw.required === true && type !== 'info',
+    reportingMetric: readString(raw.reportingMetric, 80),
+    visibility: visibility.rules,
+  };
+  if (type === 'rating' || type === 'likert') {
+    const scale = parseScale(raw.scale, type === 'likert' ? LIKERT_LABELS : RATING_LABELS);
+    if ('error' in scale) return scale;
+    return { question: { ...base, type, scale: scale.scale } };
+  }
+  if (type === 'single' || type === 'dropdown' || type === 'multi') {
+    const choices = parseChoices(raw.choices);
+    if ('error' in choices) return choices;
+    const allowOther = raw.allowOther === true;
+    if (type === 'multi') {
+      const minSelect = readInt(raw.minSelect, 0, 50, 0);
+      const maxSelect = raw.maxSelect === null || raw.maxSelect === undefined || raw.maxSelect === '' ? null : readInt(raw.maxSelect, 1, 50, 1);
+      return { question: { ...base, type, choices: choices.choices, allowOther, minSelect, maxSelect } };
+    }
+    return { question: { ...base, type, choices: choices.choices, allowOther } };
+  }
+  if (type === 'short_text' || type === 'long_text') {
+    const ceiling = type === 'short_text' ? 500 : 4000;
+    return {
+      question: {
+        ...base,
+        type,
+        minLength: readInt(raw.minLength, 0, ceiling, 0),
+        maxLength: readInt(raw.maxLength, 1, ceiling, type === 'short_text' ? 500 : 4000),
+        placeholder: readString(raw.placeholder, 200),
+      },
+    };
+  }
+  if (type === 'yes_no') {
+    return { question: { ...base, type, yesLabel: readString(raw.yesLabel, 80) || 'Yes', noLabel: readString(raw.noLabel, 80) || 'No' } };
+  }
+  if (type === 'matrix') {
+    const rows = parseRows(raw.rows);
+    if ('error' in rows) return rows;
+    const columns = parseColumns(raw.columns);
+    if ('error' in columns) return columns;
+    return { question: { ...base, type, rows: rows.rows, columns: columns.columns, allowNa: raw.allowNa === true } };
+  }
+  if (type === 'email' || type === 'phone') return { question: { ...base, type, placeholder: readString(raw.placeholder, 200) } };
+  return { question: { ...base, type: 'info', required: false } };
+}
+
+function parseVisibility(value: unknown): { rules: VisibilityRule[] } | { error: string } {
+  if (value === undefined) return { rules: [] };
+  if (!Array.isArray(value)) return { error: 'A condition is not valid.' };
+  if (value.length > 12) return { error: 'Too many conditions on one question.' };
+  const rules: VisibilityRule[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return { error: 'A condition is not valid.' };
+    const raw = item as Record<string, unknown>;
+    const questionId = readId(raw.questionId);
+    if (!questionId) continue;
+    const operator = readString(raw.operator, 20);
+    if (!OPERATORS.includes(operator as VisibilityOperator)) return { error: 'A condition uses an unknown rule.' };
+    rules.push({ questionId, operator: operator as VisibilityOperator, value: readString(raw.value, 200) || undefined });
+  }
+  return { rules };
+}
+
+function parseChoices(value: unknown): { choices: Choice[] } | { error: string } {
+  if (!Array.isArray(value)) return { error: 'Choices are not valid.' };
+  const labels = value.map((item) => (item && typeof item === 'object' ? readString((item as { label?: unknown }).label, 200) : '')).filter(Boolean);
+  return { choices: choicesFromLines(labels.join('\n')) };
+}
+
+function parseRows(value: unknown): { rows: MatrixRow[] } | { error: string } {
+  if (!Array.isArray(value)) return { error: 'Matrix rows are not valid.' };
+  const labels = value.map((item) => (item && typeof item === 'object' ? readString((item as { label?: unknown }).label, 200) : '')).filter(Boolean);
+  return { rows: rowsFromLines(labels.join('\n')) };
+}
+
+function parseColumns(value: unknown): { columns: MatrixColumn[] } | { error: string } {
+  if (!Array.isArray(value)) return { error: 'Matrix columns are not valid.' };
+  const lines = value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return '';
+      const column = item as { label?: unknown; value?: unknown };
+      const label = readString(column.label, 200);
+      if (!label) return '';
+      return `${readInt(column.value, 0, 100, 0)} ${label}`;
+    })
+    .filter(Boolean);
+  return { columns: matrixColumnsFromLines(lines.join('\n')) };
+}
+
+function parseScale(value: unknown, fallbackLabels: Record<string, string>): { scale: ScaleConfig } | { error: string } {
+  const fallback = standardScale(fallbackLabels);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: 'A scale is not valid.' };
+  const raw = value as { labels?: unknown; allowNa?: unknown };
+  const labels = raw.labels;
+  if (!labels || typeof labels !== 'object' || Array.isArray(labels)) return { error: 'A scale is not valid.' };
+  const lines = Object.entries(labels as Record<string, unknown>)
+    .filter(([key, label]) => /^\d+$/.test(key) && typeof label === 'string' && label.trim())
+    .map(([key, label]) => `${key} ${String(label).trim()}`);
+  if (lines.length < 2) return { error: 'A scale needs at least two labeled points.' };
+  const scale = scaleFromLines(lines.join('\n'), fallback);
+  scale.allowNa = raw.allowNa === true;
+  return { scale };
+}
+
+function readId(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const id = value.trim();
+  return /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : '';
+}
+
+function readString(value: unknown, max: number): string {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, max);
+}
+
+function readInt(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 export function collectAnswers(doc: SurveyDocument, form: FormData): { answers: AnswerMap; errors: FieldError[] } {
   const answers: AnswerMap = {};
   const errors: FieldError[] = [];
