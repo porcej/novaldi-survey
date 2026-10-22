@@ -120,35 +120,73 @@ export async function ensureSeeded(db: D1Database): Promise<void> {
 
 async function ensureMissingSeedTemplates(db: D1Database): Promise<void> {
   if (seedTemplatesReady) return;
-  const { results } = await db.prepare('SELECT name FROM survey_templates').all<{ name: string }>();
-  const names = new Set(results.map((row) => row.name));
-  const missing = SEED_TEMPLATES.filter((template) => !names.has(template.name));
-  if (missing.length === 0) {
-    seedTemplatesReady = true;
-    return;
-  }
+  const { results } = await db
+    .prepare(
+      `SELECT t.name, v.status, v.document_json
+       FROM survey_templates t
+       LEFT JOIN survey_versions v ON v.id = (
+         SELECT id FROM survey_versions WHERE template_id = t.id ORDER BY version_number DESC LIMIT 1
+       )`,
+    )
+    .all<{ name: string; status: string | null; document_json: string | null }>();
+  const byName = new Map(results.map((row) => [row.name, row]));
   const now = new Date().toISOString();
-  for (const template of missing) {
+  for (const template of SEED_TEMPLATES) {
+    const current = byName.get(template.name);
+    if (current?.status === 'published') continue;
+    if (current && !blankSurvey(current.document_json)) continue;
+    const document = JSON.stringify(template.document);
+    if (!current) {
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO survey_templates (name, description, category_name, anonymity, archived, created_at, updated_at)
+             SELECT ?, ?, ?, ?, 0, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM survey_templates WHERE name = ?)`,
+          )
+          .bind(template.name, template.description, template.category, template.anonymity, now, now, template.name),
+        db
+          .prepare(
+            `INSERT INTO survey_versions (template_id, version_number, status, document_json, published_at, created_at)
+             SELECT id, 1, 'published', ?, ?, ?
+             FROM survey_templates
+             WHERE name = ?
+               AND NOT EXISTS (SELECT 1 FROM survey_versions WHERE template_id = survey_templates.id)`,
+          )
+          .bind(document, now, now, template.name),
+      ]);
+      continue;
+    }
     await db.batch([
       db
-        .prepare(
-          `INSERT INTO survey_templates (name, description, category_name, anonymity, archived, created_at, updated_at)
-           SELECT ?, ?, ?, ?, 0, ?, ?
-           WHERE NOT EXISTS (SELECT 1 FROM survey_templates WHERE name = ?)`,
-        )
-        .bind(template.name, template.description, template.category, template.anonymity, now, now, template.name),
+        .prepare(`UPDATE survey_templates SET description = ?, category_name = ?, anonymity = ?, updated_at = ? WHERE name = ?`)
+        .bind(template.description, template.category, template.anonymity, now, template.name),
       db
         .prepare(
-          `INSERT INTO survey_versions (template_id, version_number, status, document_json, published_at, created_at)
-           SELECT id, 1, 'published', ?, ?, ?
-           FROM survey_templates
-           WHERE name = ?
-             AND NOT EXISTS (SELECT 1 FROM survey_versions WHERE template_id = survey_templates.id)`,
+          `UPDATE survey_versions
+           SET document_json = ?, status = 'published', published_at = ?
+           WHERE id = (
+             SELECT v.id FROM survey_versions v
+             JOIN survey_templates t ON t.id = v.template_id
+             WHERE t.name = ? AND v.status = 'draft'
+             ORDER BY v.version_number DESC
+             LIMIT 1
+           )`,
         )
-        .bind(JSON.stringify(template.document), now, now, template.name),
+        .bind(document, now, template.name),
     ]);
   }
   seedTemplatesReady = true;
+}
+
+function blankSurvey(json: string | null): boolean {
+  if (!json) return true;
+  try {
+    const document = JSON.parse(json) as { sections?: { questions?: unknown[] }[] };
+    return (document.sections ?? []).every((section) => (section.questions ?? []).length === 0);
+  } catch {
+    return false;
+  }
 }
 
 export async function getEvent(db: D1Database): Promise<EventRow> {

@@ -2,14 +2,14 @@ import type { FC } from 'hono/jsx';
 import { Hono } from 'hono';
 import { filterCards, loadCatalog, pageHref, readFilters, toCard, toCards, type AssignmentCard, type Catalog } from '../lib/catalog';
 import { archiveAssignment, countResponses, extendAssignment, getAssignment, insertAssignments, listPublishedVersions, publishAssignment, reopenAssignment, setManualState, updateAssignmentMeta, updateAssignmentRules, writeAudit, type PublishedVersion } from '../lib/db';
-import { instructorList } from '../lib/format';
+import { instructorList, programKey } from '../lib/format';
 import { field, fieldAll, readFields, stringFields } from '../lib/form';
 import { newPublicId } from '../lib/ids';
 import { isLowParticipation } from '../lib/report';
 import { qrSvg } from '../lib/qr';
 import { validateDocument, type SurveyDocument } from '../lib/questions';
 import { defaultSessionRules, describeRule, parseRules, rulesFromForm, type OpenCloseRules } from '../lib/schedule';
-import { dateInZone, datetimeLocalToUtc, formatDay, formatInstant, formatLongDate, todayInZone } from '../lib/time';
+import { dateInZone, datetimeLocalToUtc, formatClock, formatDay, formatInstant, formatLongDate, todayInZone } from '../lib/time';
 import { documentTokens, resolveDocument } from '../lib/tokens';
 import { Banner, Hero, Section, StatusBadge } from '../views/Layout';
 import { SurveyForm } from '../views/SurveyForm';
@@ -581,18 +581,8 @@ const AssignForm: FC<{ catalog: Catalog; versions: PublishedVersion[]; error?: s
         <label class="flex items-center gap-2">
           <input type="checkbox" name="no_session" value="1" /> Shared survey with no session
         </label>
-        <fieldset class="grid gap-2">
-          <legend class="font-display text-sm font-semibold uppercase tracking-wide text-navy">Sessions</legend>
-          {props.catalog.sessions.map((session) => (
-            <label class="flex items-start gap-2">
-              <input type="checkbox" name="session_id" value={String(session.id)} />
-              <span>
-                {formatDay(session.starts_at, props.catalog.event.timezone)} · {session.title}
-                <span class="text-muted"> · {props.catalog.programs.find((program) => program.id === session.program_id)?.short_name ?? 'Shared'}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        <SessionPicker catalog={props.catalog} />
+        <script src="/assign.js" defer />
         <button type="submit" class="btn btn-primary">
           Review
         </button>
@@ -600,6 +590,68 @@ const AssignForm: FC<{ catalog: Catalog; versions: PublishedVersion[]; error?: s
     </Section>
   </>
 );
+
+const SessionPicker: FC<{ catalog: Catalog }> = (props) => {
+  const zone = props.catalog.event.timezone;
+  const days = new Map<string, typeof props.catalog.sessions>();
+  for (const session of props.catalog.sessions) {
+    const day = dateInZone(session.starts_at, zone);
+    const list = days.get(day) ?? [];
+    list.push(session);
+    days.set(day, list);
+  }
+  return (
+    <fieldset id="session-picker" class="grid gap-4">
+      <legend class="font-display text-sm font-semibold uppercase tracking-wide text-navy">Sessions</legend>
+      <p class="text-sm text-muted">These settings are copied onto every session you select.</p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-quiet btn-sm" data-select="all">
+          Select all
+        </button>
+        <button type="button" class="btn btn-quiet btn-sm" data-select="program" data-program="company">
+          Company
+        </button>
+        <button type="button" class="btn btn-quiet btn-sm" data-select="program" data-program="command">
+          Command
+        </button>
+        <button type="button" class="btn btn-quiet btn-sm" data-select="none">
+          Clear
+        </button>
+      </div>
+      <p class="text-sm font-semibold text-navy" data-selected-count>
+        0 sessions selected
+      </p>
+      {[...days.entries()].map(([day, sessions]) => (
+        <div class="grid gap-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-display text-xl font-bold uppercase text-navy">{formatDay(day, zone)}</h3>
+            <button type="button" class="btn btn-quiet btn-sm" data-select="day" data-day={day}>
+              Select day
+            </button>
+          </div>
+          {sessions.map((session) => {
+            const program = props.catalog.programs.find((item) => item.id === session.program_id);
+            const key = program ? (programKey(program.name) ?? 'shared') : 'shared';
+            const instructors = instructorList(props.catalog.instructors.get(session.id) ?? []);
+            return (
+              <label class="flex items-start gap-2">
+                <input type="checkbox" name="session_id" value={String(session.id)} data-day={day} data-program={key} />
+                <span>
+                  {formatClock(session.starts_at, zone)}–{formatClock(session.ends_at, zone)} · {session.title}
+                  <span class="text-muted">
+                    {' '}
+                    · {program?.short_name ?? 'Shared'}
+                    {instructors ? ` · ${instructors}` : ''}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      ))}
+    </fieldset>
+  );
+};
 
 const RuleFields: FC<{ rules?: OpenCloseRules }> = (props) => {
   const rules = props.rules ?? defaultSessionRules();
