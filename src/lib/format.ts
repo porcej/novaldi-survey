@@ -16,6 +16,28 @@ export const STATUS_LABEL: Record<Availability, string> = {
   archived: 'Archived',
 };
 
+export function templateSlug(name: string): string {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+  return slug || 'template';
+}
+
+export function templateHref(template: { id: number; name: string }, templates: { id: number; name: string }[]): string {
+  const slug = templateSlug(template.name);
+  const same = templates.filter((item) => templateSlug(item.name) === slug).sort((a, b) => a.id - b.id);
+  const suffix = same.length > 1 && same[0]?.id !== template.id;
+  return `/templates/${suffix ? `${slug}-${template.id}` : slug}`;
+}
+
+export function templateFromSlug<T extends { id: number; name: string }>(templates: T[], param: string): T | undefined {
+  const slug = param.trim().toLowerCase();
+  const exact = templates.filter((item) => templateSlug(item.name) === slug).sort((a, b) => a.id - b.id);
+  if (exact.length > 0) return exact[0];
+  const suffixed = /^(.+)-(\d+)$/.exec(slug);
+  if (!suffixed) return undefined;
+  const id = Number(suffixed[2]);
+  return templates.find((item) => item.id === id && `${templateSlug(item.name)}-${item.id}` === slug);
+}
+
 export function programKey(name: string): 'company' | 'command' | 'shared' | null {
   const value = name.trim().toLowerCase();
   if (!value || value === 'shared' || value === 'all' || value === 'both') return 'shared';

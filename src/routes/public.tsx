@@ -1,16 +1,16 @@
 import { Hono } from 'hono';
 import type { FC } from 'hono/jsx';
 import { getCookie, setCookie } from 'hono/cookie';
-import { loadCatalog, openProgramCards, publicCards } from '../lib/catalog';
+import { loadCatalog, openProgramCards, openTemplateCards, publicCards, visibleTemplates } from '../lib/catalog';
 import { getAssignmentByPublicId, getEvent, getSession, guardExists, saveResponse } from '../lib/db';
 import { fieldsToForm, readFields } from '../lib/form';
 import { sha256Hex } from '../lib/crypto';
 import { newPublicId } from '../lib/ids';
 import { collectAnswers, formValueMap } from '../lib/questions';
 import { computeWindow, parseRules } from '../lib/schedule';
-import { instructorList } from '../lib/format';
+import { instructorList, templateFromSlug, templateHref } from '../lib/format';
 import { dateInZone, formatClock, formatDay, formatInstant } from '../lib/time';
-import { ClassDirectory, SurveyDirectory } from '../views/Directory';
+import { ClassDirectory, SurveyDirectory, TemplateChooser, TemplateIndex, type TemplateChoice } from '../views/Directory';
 import { Banner, Hero, Section } from '../views/Layout';
 import { SurveyForm } from '../views/SurveyForm';
 import { page, type AppContext } from './guard';
@@ -25,6 +25,55 @@ publicRoutes.get('/', async (c) => {
 
 publicRoutes.get('/company', async (c) => programIndex(c, 'company'));
 publicRoutes.get('/command', async (c) => programIndex(c, 'command'));
+
+publicRoutes.get('/templates', async (c) => {
+  const catalog = await loadCatalog(c.env.DB);
+  const templates = templateChoices(catalog);
+  const requested = c.req.query('template');
+  if (requested) {
+    const template = templateFromSlug(visibleTemplates(catalog), requested);
+    if (template) return c.redirect(templateHref(template, visibleTemplates(catalog)));
+  }
+  return page(c, {}, 'Surveys by template', <TemplateIndex templates={templates} />);
+});
+
+publicRoutes.get('/templates/:slug', async (c) => {
+  const catalog = await loadCatalog(c.env.DB);
+  const templates = visibleTemplates(catalog);
+  const template = templateFromSlug(templates, c.req.param('slug') ?? '');
+  if (!template) return page(c, {}, 'Template not found', <Hero title="Template not found" lead="That questionnaire is not available." />, 404);
+  const choices = templateChoices(catalog);
+  const cards = openTemplateCards(publicCards(catalog), template.id);
+  return page(
+    c,
+    {},
+    template.name,
+    <SurveyDirectory
+      title={template.name}
+      lead={`Published ${template.name} surveys that are open now.`}
+      cards={cards}
+      zone={catalog.event.timezone}
+      empty={`No ${template.name} surveys are open right now.`}
+      showSession
+      picker={<TemplateChooser templates={choices} current={choices.find((choice) => choice.name === template.name)?.slug} />}
+    />,
+  );
+});
+
+function templateChoices(catalog: Awaited<ReturnType<typeof loadCatalog>>): TemplateChoice[] {
+  const templates = visibleTemplates(catalog);
+  const cards = publicCards(catalog);
+  return templates.map((template) => {
+    const href = templateHref(template, templates);
+    return {
+      slug: href.slice('/templates/'.length),
+      href,
+      name: template.name,
+      category: template.category_name,
+      openCount: openTemplateCards(cards, template.id).length,
+    };
+  });
+}
 
 async function programIndex(c: AppContext, program: 'company' | 'command') {
   const catalog = await loadCatalog(c.env.DB);

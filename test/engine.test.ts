@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SEED_TEMPLATES } from '../src/content/templates';
 import { parseSessionCsv, toCsv } from '../src/lib/csv';
-import { instructorList } from '../src/lib/format';
+import { instructorList, templateFromSlug, templateHref, templateSlug } from '../src/lib/format';
 import {
   collectAnswers,
   fieldName,
@@ -194,6 +194,23 @@ describe('time and tokens', () => {
     expect(resolved.unresolved).toEqual([]);
     expect(resolved.document.sections[0]?.title).toBe('Leadership Fundamentals');
     expect(unresolvedTokens(resolveDocument(session, { session_title: 'Leadership' }).document.sections[0]?.description ?? '')).toContain('instructor_name');
+  });
+});
+
+describe('template links', () => {
+  const templates = [
+    { id: 1, name: 'Scenario' },
+    { id: 2, name: 'Standard Session Evaluation' },
+    { id: 8, name: 'Scenario' },
+  ];
+
+  it('builds a shareable slug and keeps the older name when two templates match', () => {
+    expect(templateSlug('Standard Session Evaluation')).toBe('standard-session-evaluation');
+    expect(templateHref(templates[0]!, templates)).toBe('/templates/scenario');
+    expect(templateHref(templates[2]!, templates)).toBe('/templates/scenario-8');
+    expect(templateFromSlug(templates, 'scenario')?.id).toBe(1);
+    expect(templateFromSlug(templates, 'scenario-8')?.id).toBe(8);
+    expect(templateFromSlug(templates, 'missing')).toBeUndefined();
   });
 });
 

@@ -73,6 +73,14 @@ export function openProgramCards(cards: AssignmentCard[], catalog: Catalog, prog
   return cards.filter((card) => card.window.availability === 'open' && cardProgram(card, catalog) === program);
 }
 
+export function visibleTemplates(catalog: Catalog): TemplateRow[] {
+  return catalog.templates.filter((template) => template.archived !== 1).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+}
+
+export function openTemplateCards(cards: AssignmentCard[], templateId: number): AssignmentCard[] {
+  return cards.filter((card) => card.window.availability === 'open' && card.assignment.template_id === templateId);
+}
+
 export function toCards(catalog: Catalog, now = new Date().toISOString()): AssignmentCard[] {
   return catalog.assignments
     .map((assignment) => toCard(catalog, assignment, now))

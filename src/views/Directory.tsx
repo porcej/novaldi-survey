@@ -1,4 +1,4 @@
-import type { FC } from 'hono/jsx';
+import type { Child, FC } from 'hono/jsx';
 import { openProgramCards, type AssignmentCard, type Catalog } from '../lib/catalog';
 import type { SessionRow } from '../lib/db';
 import { instructorList } from '../lib/format';
@@ -17,6 +17,11 @@ export const ClassDirectory: FC<{ catalog: Catalog; cards: AssignmentCard[] }> =
           <ProgramLink href="/company" title="Company surveys" count={openProgramCards(props.cards, props.catalog, 'company').length} />
           <ProgramLink href="/command" title="Command surveys" count={openProgramCards(props.cards, props.catalog, 'command').length} />
         </div>
+        <p class="mt-4">
+          <a href="/templates" class="font-semibold text-navy underline">
+            Surveys by template
+          </a>
+        </p>
       </Section>
       {days.length === 0 && shared.length === 0 ? (
         <Section narrow>
@@ -71,7 +76,54 @@ export const ClassDirectory: FC<{ catalog: Catalog; cards: AssignmentCard[] }> =
   );
 };
 
-export const SurveyDirectory: FC<{ title: string; lead: string; cards: AssignmentCard[]; zone: string; empty?: string; showSession?: boolean }> = (props) => (
+export type TemplateChoice = { slug: string; href: string; name: string; category: string; openCount: number };
+
+export const TemplateChooser: FC<{ templates: TemplateChoice[]; current?: string }> = (props) => (
+  <form method="get" action="/templates" class="mb-6 flex flex-wrap items-end gap-3">
+    <label class="block min-w-64">
+      <span class="font-display text-sm font-semibold uppercase tracking-wide text-navy">Template</span>
+      <select class="select mt-1.5" name="template" onchange="if (this.value) this.form.requestSubmit()">
+        <option value="">Choose a template</option>
+        {props.templates.map((template) => (
+          <option value={template.slug} selected={template.slug === props.current}>
+            {template.name}
+          </option>
+        ))}
+      </select>
+    </label>
+    <button type="submit" class="btn btn-secondary">
+      Show
+    </button>
+  </form>
+);
+
+export const TemplateIndex: FC<{ templates: TemplateChoice[] }> = (props) => (
+  <>
+    <Hero compact title="Surveys by template" lead="Published surveys that are open now, grouped by questionnaire." />
+    <Section>
+      <p class="mb-6">
+        <a href="/" class="font-semibold text-navy underline">
+          All classes
+        </a>
+      </p>
+      <TemplateChooser templates={props.templates} />
+      {props.templates.length === 0 ? <p class="text-muted">No templates are available yet.</p> : null}
+      <ul class="grid gap-3">
+        {props.templates.map((template) => (
+          <li>
+            <a href={template.href} class="panel block transition hover:border-navy">
+              <h2 class="font-display text-2xl font-bold uppercase leading-none text-navy">{template.name}</h2>
+              <p class="mt-2 text-sm text-muted">{template.category}</p>
+              <p class="mt-3 text-sm font-semibold text-navy">{template.openCount === 1 ? '1 survey open now' : `${template.openCount} surveys open now`}</p>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  </>
+);
+
+export const SurveyDirectory: FC<{ title: string; lead: string; cards: AssignmentCard[]; zone: string; empty?: string; showSession?: boolean; picker?: Child }> = (props) => (
   <>
     <Hero compact title={props.title} lead={props.lead} />
     <Section>
@@ -80,6 +132,7 @@ export const SurveyDirectory: FC<{ title: string; lead: string; cards: Assignmen
           All classes
         </a>
       </p>
+      {props.picker}
       {props.cards.length === 0 ? <p class="text-muted">{props.empty ?? 'No surveys are published for this class yet.'}</p> : null}
       <ul class="grid gap-3">
         {props.cards.map((card) => {
