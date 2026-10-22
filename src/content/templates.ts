@@ -1,6 +1,7 @@
 import {
   LIKERT_LABELS,
   RATING_LABELS,
+  choicesFromLines,
   scaleColumns,
   standardScale,
   type Question,
@@ -45,6 +46,35 @@ function rating(id: string, title: string, metric: string, required = true): Que
 
 function likert(id: string, title: string, metric: string): Question {
   return { id, type: 'likert', title, description: '', required: true, reportingMetric: metric, visibility: [], scale: standardScale(LIKERT_LABELS) };
+}
+
+function single(id: string, title: string, metric: string, labels: string[]): Question {
+  return {
+    id,
+    type: 'single',
+    title,
+    description: '',
+    required: true,
+    reportingMetric: metric,
+    visibility: [],
+    allowOther: false,
+    choices: choicesFromLines(labels.join('\n')),
+  };
+}
+
+function longText(id: string, title: string, metric: string): Question {
+  return {
+    id,
+    type: 'long_text',
+    title,
+    description: '',
+    required: false,
+    reportingMetric: metric,
+    visibility: [],
+    minLength: 0,
+    maxLength: 4000,
+    placeholder: '',
+  };
 }
 
 export const SEED_TEMPLATES: SeedTemplate[] = [
@@ -385,6 +415,62 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
             visibility: show('interested', 'Yes', 'Maybe'),
             placeholder: '',
           },
+        ]),
+      ],
+    },
+  },
+  {
+    name: 'Scenario',
+    description: 'Feedback on a leadership scenario, including fit for rank, difficulty, realism, and the debrief.',
+    category: 'Practical Exercises',
+    anonymity: 'anonymous',
+    document: {
+      sections: [
+        section('scenario', '{{session_title}}', '{{instructor_name}} · {{session_date}} · {{class_name}}', [
+          single('rank_fit', 'Was the scenario appropriate for your current rank or position?', 'scenario_rank_fit', [
+            'Not appropriate',
+            'Somewhat appropriate',
+            'Appropriate',
+            'Very appropriate',
+          ]),
+          single('benefit', 'How beneficial was this scenario to your leadership development?', 'scenario_benefit', [
+            'Not beneficial',
+            'Slightly beneficial',
+            'Moderately beneficial',
+            'Very beneficial',
+            'Extremely beneficial',
+          ]),
+          single('difficulty', 'How would you rate the difficulty of the scenario?', 'scenario_difficulty', [
+            'Much too easy',
+            'Slightly too easy',
+            'Appropriate level of difficulty',
+            'Slightly too difficult',
+            'Much too difficult',
+          ]),
+          single('realism', 'How realistic was the scenario compared to challenges you may encounter in your role?', 'scenario_realism', [
+            'Not realistic',
+            'Slightly realistic',
+            'Moderately realistic',
+            'Very realistic',
+            'Extremely realistic',
+          ]),
+          single('practice', 'Did the scenario provide an opportunity to practice leadership, decision-making, and problem-solving skills?', 'scenario_practice', [
+            'Not at all',
+            'To a limited extent',
+            'To a moderate extent',
+            'To a great extent',
+            'To a very great extent',
+          ]),
+          single('debrief', 'How effective was the feedback or debriefing following the scenario?', 'scenario_debrief', [
+            'Not effective',
+            'Slightly effective',
+            'Moderately effective',
+            'Very effective',
+            'Extremely effective',
+            'Not applicable',
+          ]),
+          longText('takeaway', 'What was your most valuable takeaway from this scenario?', 'scenario_takeaway'),
+          longText('improvements', 'How could this scenario be improved for future LDI classes?', 'scenario_improvements'),
         ]),
       ],
     },

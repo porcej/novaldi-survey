@@ -72,9 +72,14 @@ const ASSIGNMENT_COLUMNS = `id, public_id, event_id, version_id, template_id, se
   program_id, anonymity, required_flag, expected_count, open_rule_json, schedule_override, override_open_at,
   override_close_at, publication, manual_state, rendered_json`;
 
+let seedTemplatesReady = false;
+
 export async function ensureSeeded(db: D1Database): Promise<void> {
   const existing = await db.prepare('SELECT id FROM events WHERE name = ?').bind(EVENT_NAME).first();
-  if (existing) return;
+  if (existing) {
+    await ensureMissingSeedTemplates(db);
+    return;
+  }
   const now = new Date().toISOString();
   const statements: D1PreparedStatement[] = [
     db.prepare(
@@ -109,7 +114,41 @@ export async function ensureSeeded(db: D1Database): Promise<void> {
   } catch (error) {
     const row = await db.prepare('SELECT id FROM events WHERE name = ?').bind(EVENT_NAME).first();
     if (!row) throw error;
+    await ensureMissingSeedTemplates(db);
   }
+}
+
+async function ensureMissingSeedTemplates(db: D1Database): Promise<void> {
+  if (seedTemplatesReady) return;
+  const { results } = await db.prepare('SELECT name FROM survey_templates').all<{ name: string }>();
+  const names = new Set(results.map((row) => row.name));
+  const missing = SEED_TEMPLATES.filter((template) => !names.has(template.name));
+  if (missing.length === 0) {
+    seedTemplatesReady = true;
+    return;
+  }
+  const now = new Date().toISOString();
+  for (const template of missing) {
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO survey_templates (name, description, category_name, anonymity, archived, created_at, updated_at)
+           SELECT ?, ?, ?, ?, 0, ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM survey_templates WHERE name = ?)`,
+        )
+        .bind(template.name, template.description, template.category, template.anonymity, now, now, template.name),
+      db
+        .prepare(
+          `INSERT INTO survey_versions (template_id, version_number, status, document_json, published_at, created_at)
+           SELECT id, 1, 'published', ?, ?, ?
+           FROM survey_templates
+           WHERE name = ?
+             AND NOT EXISTS (SELECT 1 FROM survey_versions WHERE template_id = survey_templates.id)`,
+        )
+        .bind(JSON.stringify(template.document), now, now, template.name),
+    ]);
+  }
+  seedTemplatesReady = true;
 }
 
 export async function getEvent(db: D1Database): Promise<EventRow> {
